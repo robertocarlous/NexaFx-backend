@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { MailModule } from './modules/mail/mail.module';
 import { AuthModule } from './auth/auth.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 import { ExchangeRatesModule } from './exchange-rates/exchange-rates.module';
@@ -69,6 +70,7 @@ import { UsersModule } from './users/users.module';
       inject: [ConfigService],
     }),
     CommonModule,
+    MailModule,
     AuthModule,
     CurrenciesModule,
     ExchangeRatesModule,

@@ -86,6 +86,24 @@ export class User {
   @Column({ type: 'boolean', default: false })
   isVerified: boolean;
 
+  @Column({ type: 'boolean', default: false })
+  isEmailVerified: boolean;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  emailVerificationTokenHash: string | null;
+
+  @Column({ type: 'timestamp with time zone', nullable: true })
+  emailVerificationExpires: Date | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  passwordResetTokenHash: string | null;
+
+  @Column({ type: 'timestamp with time zone', nullable: true })
+  passwordResetExpires: Date | null;
+
+  @Column({ type: 'timestamp with time zone', nullable: true })
+  emailVerificationLastSentAt: Date | null;
+
   @Column({
     type: 'enum',
     enum: UserKycTier,

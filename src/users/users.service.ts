@@ -71,6 +71,20 @@ export class UsersService {
     });
   }
 
+  async findByEmailVerificationTokenHash(
+    tokenHash: string,
+  ): Promise<User | null> {
+    return this.userRepository.findOne({
+      where: { emailVerificationTokenHash: tokenHash },
+    });
+  }
+
+  async findByPasswordResetTokenHash(tokenHash: string): Promise<User | null> {
+    return this.userRepository.findOne({
+      where: { passwordResetTokenHash: tokenHash },
+    });
+  }
+
   async deleteById(id: string): Promise<void> {
     await this.userRepository.delete(id);
   }

@@ -3,6 +3,8 @@ import {
   UnauthorizedException,
   ConflictException,
   BadRequestException,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
 import { JwtService } from '@nestjs/jwt';
@@ -25,7 +27,10 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SignupDto } from './dto/signup.dto';
 import { VerifySignupOtpDto } from './dto/verify-signup-otp.dto';
 import { VerifySignupResponseDto } from './dto/signup-response.dto';
-import { AuthUserResponseDto, VerifyLoginOtpResponseDto } from './dto/signup-response.dto';
+import {
+  AuthUserResponseDto,
+  VerifyLoginOtpResponseDto,
+} from './dto/signup-response.dto';
 import { VerifyTwoFactorDto } from './dto/verify-2fa.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
@@ -33,6 +38,12 @@ import { AuditAction } from '../audit-logs/enums/audit-action.enum';
 import { ReferralsService } from '../referrals/referrals.service';
 import { TwoFactorService } from '../two-factor/two-factor.service';
 import { WalletsService } from '../wallets/wallets.service';
+import { MailService } from '../modules/mail/mail.service';
+import {
+  generateSecureToken,
+  hashToken,
+} from '../common/utils/auth-token.util';
+import { User } from '../users/user.entity';
 
 @Injectable()
 export class AuthService {
@@ -49,6 +60,7 @@ export class AuthService {
     private readonly referralsService: ReferralsService,
     private readonly twoFactorService: TwoFactorService,
     private readonly walletsService: WalletsService,
+    private readonly mailService: MailService,
     @InjectRepository(PasswordResetAttempt)
     private readonly passwordResetAttemptRepository: Repository<PasswordResetAttempt>,
   ) {}
@@ -258,28 +270,19 @@ export class AuthService {
     ipAddress?: string,
     userAgent?: string,
   ): Promise<{ message: string }> {
-    const user = await this.usersService.findByEmail(forgotDto.email);
     const genericMessage =
       'If an account exists with this email, password reset instructions have been sent.';
 
-    if (!user || !user.isVerified) {
+    const user = await this.usersService.findByEmail(forgotDto.email);
+
+    if (!user) {
       await this.simulateProcessingDelay();
       return { message: genericMessage };
     }
 
     await this.checkPasswordResetRateLimit(forgotDto.email, ipAddress);
+    await this.issueAndSendPasswordResetEmail(user);
 
-    const otp = await this.otpsService.generateOtp(
-      user,
-      OtpType.PASSWORD_RESET,
-    );
-    await this.otpDeliveryService.sendOtp({
-      email: user.email,
-      type: OtpType.PASSWORD_RESET,
-      otp,
-    });
-
-    // Log password reset request
     await this.auditLogsService.logAuthEvent(
       user.id,
       AuditAction.PASSWORD_RESET_REQUEST,
@@ -298,25 +301,28 @@ export class AuthService {
     ipAddress?: string,
     userAgent?: string,
   ): Promise<{ message: string }> {
-    const user = await this.usersService.findByEmail(resetDto.email);
-    if (!user || !user.isVerified) {
-      throw new UnauthorizedException('Invalid credentials');
+    const tokenHash = hashToken(resetDto.token);
+    const user =
+      await this.usersService.findByPasswordResetTokenHash(tokenHash);
+
+    if (
+      !user ||
+      !user.passwordResetExpires ||
+      user.passwordResetExpires.getTime() < Date.now()
+    ) {
+      throw new BadRequestException('Invalid or expired password reset token');
     }
 
-    await this.otpsService.validateOtp(
-      user,
-      resetDto.otp,
-      OtpType.PASSWORD_RESET,
-    );
     await this.usersService.updateByUserId(user.id, {
       failedLoginAttempts: 0,
       lockedUntil: null,
+      passwordResetTokenHash: null,
+      passwordResetExpires: null,
     });
     await this.usersService.updatePassword(user.id, resetDto.newPassword);
     await this.refreshTokensService.revokeAllUserTokens(user.id);
     await this.otpsService.invalidateAllUserOtps(user.id);
 
-    // Log password reset completion
     await this.auditLogsService.logAuthEvent(
       user.id,
       AuditAction.PASSWORD_RESET_COMPLETE,
@@ -331,6 +337,83 @@ export class AuthService {
       message:
         'Password has been reset successfully. Please login with your new password.',
     };
+  }
+
+  async verifyEmail(token: string): Promise<{ message: string }> {
+    const tokenHash = hashToken(token);
+    const user =
+      await this.usersService.findByEmailVerificationTokenHash(tokenHash);
+
+    if (
+      !user ||
+      !user.emailVerificationExpires ||
+      user.emailVerificationExpires.getTime() < Date.now()
+    ) {
+      throw new BadRequestException('Invalid or expired verification token');
+    }
+
+    await this.usersService.updateByUserId(user.id, {
+      isEmailVerified: true,
+      isVerified: true,
+      emailVerificationTokenHash: null,
+      emailVerificationExpires: null,
+    });
+    await this.usersService.verifyUser(user.id);
+
+    return { message: 'Email verified successfully' };
+  }
+
+  async resendVerification(userId: string): Promise<{ message: string }> {
+    const user = await this.usersService.findById(userId);
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    if (user.isEmailVerified) {
+      throw new BadRequestException('Email is already verified');
+    }
+
+    if (user.emailVerificationLastSentAt) {
+      const elapsedMs = Date.now() - user.emailVerificationLastSentAt.getTime();
+      if (elapsedMs < 5 * 60 * 1000) {
+        throw new HttpException(
+          'Verification email was sent recently. Please wait 5 minutes before resending.',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+    }
+
+    await this.issueAndSendEmailVerification(user);
+
+    return { message: 'Verification email sent' };
+  }
+
+  private async issueAndSendEmailVerification(user: User): Promise<void> {
+    const token = generateSecureToken();
+    const tokenHash = hashToken(token);
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await this.usersService.updateByUserId(user.id, {
+      emailVerificationTokenHash: tokenHash,
+      emailVerificationExpires: expires,
+      emailVerificationLastSentAt: new Date(),
+    });
+
+    await this.mailService.sendVerificationEmail(user.email, token);
+  }
+
+  private async issueAndSendPasswordResetEmail(user: User): Promise<void> {
+    const token = generateSecureToken();
+    const tokenHash = hashToken(token);
+    const expires = new Date(Date.now() + 60 * 60 * 1000);
+
+    await this.usersService.updateByUserId(user.id, {
+      passwordResetTokenHash: tokenHash,
+      passwordResetExpires: expires,
+    });
+
+    await this.mailService.sendPasswordResetEmail(user.email, token);
   }
 
   async refreshAccessToken(refreshToken: string): Promise<{
@@ -364,7 +447,7 @@ export class AuthService {
     const normalizedEmail = signupDto.email.toLowerCase().trim();
     const normalizedReferralCode = signupDto.referralCode?.toUpperCase().trim();
     const genericMessage =
-      'this email is available, a verification code has been sent.';
+      'User has been created. A verification email has been sent.';
 
     // Check if email already exists
     const existingUser = await this.usersService.findByEmail(normalizedEmail);
@@ -432,19 +515,13 @@ export class AuthService {
       await this.referralsService.createPendingReferral(referredBy, user.id);
     }
 
-    // Generate and send OTP
     const fullUser = await this.usersService.findById(user.id);
     if (fullUser) {
-      const otp = await this.otpsService.generateOtp(fullUser, OtpType.SIGNUP);
-      await this.otpDeliveryService.sendOtp({
-        email: fullUser.email,
-        type: OtpType.SIGNUP,
-        otp,
-      });
+      await this.issueAndSendEmailVerification(fullUser);
     }
 
     return {
-      message: 'User has been created and a verification code has been sent',
+      message: 'User has been created. A verification email has been sent.',
     };
   }
 
@@ -660,7 +737,11 @@ export class AuthService {
     return decoded.sub;
   }
 
-  private async issueAuthTokens(userId: string, email: string, role: string): Promise<VerifyLoginOtpResponseDto> {
+  private async issueAuthTokens(
+    userId: string,
+    email: string,
+    role: string,
+  ): Promise<VerifyLoginOtpResponseDto> {
     const user = await this.usersService.findById(userId);
     const payload = { sub: userId, email, role };
     const authUser: AuthUserResponseDto = {

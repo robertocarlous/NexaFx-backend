@@ -1,7 +1,9 @@
 import {
   Controller,
   Post,
+  Get,
   Body,
+  Query,
   HttpCode,
   HttpStatus,
   Request,
@@ -83,7 +85,8 @@ export class AuthController {
   @ApiBody({ type: VerifyTwoFactorDto })
   @ApiResponse({
     status: 200,
-    description: '2FA verified. Returns full auth tokens + user object (including name).',
+    description:
+      '2FA verified. Returns full auth tokens + user object (including name).',
     type: VerifyLoginOtpResponseDto,
   })
   @ApiResponse({
@@ -130,11 +133,11 @@ export class AuthController {
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Reset password using OTP',
+    summary: 'Reset password using token from email link',
     description:
       'Completes the password-reset flow. Call POST /auth/forgot-password first ' +
-      'to receive a 6-digit OTP by email, then submit that OTP here together with ' +
-      'the registered email and the desired new password.',
+      'to receive a reset link by email, then submit the token from that link ' +
+      'together with the desired new password.',
   })
   @ApiBody({ type: ResetPasswordDto })
   @ApiResponse({
@@ -200,6 +203,39 @@ export class AuthController {
   }
 
   @Public()
+  @Get('verify-email')
+  @ApiOperation({ summary: 'Verify email address using token from email link' })
+  @ApiResponse({ status: 200, description: 'Email verified successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired token' })
+  async verifyEmail(@Query('token') token: string) {
+    return this.authService.verifyEmail(token);
+  }
+
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Resend email verification link' })
+  @ApiResponse({ status: 200, description: 'Verification email sent' })
+  @ApiResponse({ status: 429, description: 'Rate limited — wait 5 minutes' })
+  async resendVerification(@Request() req: { user: { userId: string } }) {
+    return this.authService.resendVerification(req.user.userId);
+  }
+
+  @Public()
+  @Throttle({
+    default: {
+      ttl: 60 * 1000,
+      limit: Number(process.env.THROTTLE_AUTH_LIMIT ?? 5),
+    },
+  })
+  @Post('register')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Register a new user account (alias for signup)' })
+  @ApiBody({ type: SignupDto })
+  async register(@Body() signupDto: SignupDto) {
+    return this.authService.signup(signupDto);
+  }
+
+  @Public()
   @Throttle({
     default: {
       ttl: 60 * 1000,
@@ -212,7 +248,7 @@ export class AuthController {
   @ApiBody({ type: SignupDto })
   @ApiResponse({
     status: 200,
-    description: 'Account created, OTP sent to email',
+    description: 'Account created, verification email sent',
     schema: {
       type: 'object',
       properties: {
