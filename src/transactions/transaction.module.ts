@@ -8,7 +8,7 @@ import { CurrenciesModule } from '../currencies/currencies.module';
 import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { UsersModule } from '../users/users.module';
-import { ReferralsModule } from '../referrals/referrals.module';
+import { V2ReferralsModule } from '../modules/referrals/referrals.module';
 import { FeesModule } from '../fees/fees.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { BeneficiariesModule } from '../beneficiaries/beneficiaries.module';
@@ -27,7 +27,7 @@ import { TransactionLimitsModule } from './transaction-limits.module';
     ExchangeRatesModule,
     BlockchainModule,
     UsersModule,
-    ReferralsModule,
+    V2ReferralsModule,
     FeesModule,
     NotificationsModule,
     BeneficiariesModule,

@@ -36,7 +36,7 @@ import { UsersService } from '../../users/users.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
 import { AuditAction } from '../../audit-logs/enums/audit-action.enum';
 import { UserRole } from '../../users/user.entity';
-import { ReferralsService } from '../../referrals/referrals.service';
+import { V2ReferralsService } from '../../modules/referrals/referrals.service';
 import { CalculatedFee, FeesService } from '../../fees/fees.service';
 import {
   FeeTransactionType,
@@ -150,7 +150,7 @@ export class TransactionsService {
     private readonly feesService: FeesService,
     private readonly usersService: UsersService,
     private readonly auditLogsService: AuditLogsService,
-    private readonly referralsService: ReferralsService,
+    private readonly v2ReferralsService: V2ReferralsService,
     private readonly notificationsService: NotificationsService,
     private readonly beneficiariesService: BeneficiariesService, // ← NEW
     private readonly firebaseService: FirebaseService,
@@ -267,14 +267,7 @@ export class TransactionsService {
       transaction.txHash = rawResult.hash;
       await this.transactionRepository.save(transaction);
 
-      try {
-        await this.referralsService.processReferralReward(userId);
-      } catch (referralError) {
-        const error = toError(referralError);
-        this.logger.warn(
-          `Referral reward processing failed for user ${userId}: ${error.message}`,
-        );
-      }
+      await this.tryProcessReferralReward(userId);
 
       this.logger.log(
         `Deposit transaction created successfully: ${transaction.id}`,
@@ -711,6 +704,8 @@ export class TransactionsService {
         transaction.status = TransactionStatus.SUCCESS;
         await this.transactionRepository.save(transaction);
 
+        await this.tryProcessReferralReward(userId);
+
         await this.updateUserBalance(
           userId,
           fromCurrency,
@@ -908,6 +903,8 @@ export class TransactionsService {
 
       if (verificationResult.status === 'SUCCESS') {
         transaction.status = TransactionStatus.SUCCESS;
+
+        await this.tryProcessReferralReward(transaction.userId);
 
         if (transaction.type === TransactionType.DEPOSIT) {
           await this.updateUserBalance(
@@ -1347,6 +1344,17 @@ export class TransactionsService {
       });
     } catch (e) {
       // Intentionally swallow errors so it doesn't break flows
+    }
+  }
+
+  private async tryProcessReferralReward(userId: string): Promise<void> {
+    try {
+      await this.v2ReferralsService.processRewardOnFirstTransaction(userId);
+    } catch (referralError) {
+      const error = toError(referralError);
+      this.logger.warn(
+        `Referral reward processing failed for user ${userId}: ${error.message}`,
+      );
     }
   }
 

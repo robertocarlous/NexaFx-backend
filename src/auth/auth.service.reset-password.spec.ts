@@ -25,7 +25,7 @@ import { StellarService } from '../blockchain/stellar/stellar.service';
 import { EncryptionService } from '../common/services/encryption.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction } from '../audit-logs/enums/audit-action.enum';
-import { ReferralsService } from '../referrals/referrals.service';
+import { V2ReferralsService } from '../modules/referrals/referrals.service';
 import { TwoFactorService } from '../two-factor/two-factor.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { PasswordResetAttempt } from './entities/password-reset-attempt.entity';
@@ -84,7 +84,9 @@ const mockJwtService = { sign: jest.fn().mockReturnValue('token'), verify: jest.
 const mockConfigService = { get: jest.fn().mockReturnValue('15m') };
 const mockStellarService = { generateWallet: jest.fn() };
 const mockEncryptionService = { encrypt: jest.fn() };
-const mockReferralsService = { createPendingReferral: jest.fn() };
+const mockV2ReferralsService = {
+  linkReferralOnRegistration: jest.fn(),
+};
 const mockTwoFactorService = { verifyTotpCode: jest.fn() };
 const mockWalletsService = { seedPrimaryWalletFromUserCredentials: jest.fn() };
 const mockPasswordResetAttemptRepository = {
@@ -114,7 +116,7 @@ describe('AuthService.resetPassword()', () => {
         { provide: StellarService, useValue: mockStellarService },
         { provide: EncryptionService, useValue: mockEncryptionService },
         { provide: AuditLogsService, useValue: mockAuditLogsService },
-        { provide: ReferralsService, useValue: mockReferralsService },
+        { provide: V2ReferralsService, useValue: mockV2ReferralsService },
         { provide: TwoFactorService, useValue: mockTwoFactorService },
         { provide: WalletsService, useValue: mockWalletsService },
         {

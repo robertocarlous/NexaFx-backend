@@ -14,7 +14,7 @@ import { ExchangeRatesService } from '../../exchange-rates/exchange-rates.servic
 import { StellarService } from '../../blockchain/stellar/stellar.service';
 import { UsersService } from '../../users/users.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
-import { ReferralsService } from '../../referrals/referrals.service';
+import { V2ReferralsService } from '../../modules/referrals/referrals.service';
 import { FeesService } from '../../fees/fees.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { NotificationType } from '../../notifications/entities/notification.entity';
@@ -152,9 +152,9 @@ describe('TransactionsService.createSwap', () => {
           },
         },
         {
-          provide: ReferralsService,
+          provide: V2ReferralsService,
           useValue: {
-            processReferralReward: jest.fn(async () => ({})),
+            processRewardOnFirstTransaction: jest.fn(async () => ({})),
           },
         },
         { provide: NotificationsService, useValue: notificationsService },

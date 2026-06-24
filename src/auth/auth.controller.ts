@@ -12,6 +12,9 @@ import { AuthService } from './auth.service';
 import { Public } from './decorators/public.decorator';
 import { LoginDto } from './dto/login.dto';
 import { VerifyLoginOtpDto } from './dto/verify-login-otp.dto';
+import { TwoFactorSetupResponseDto } from './dto/two-factor-setup-response.dto';
+import { TwoFactorTokenDto } from './dto/two-factor-token.dto';
+import { AuthenticateTwoFactorDto } from './dto/authenticate-2fa.dto';
 import { VerifyTwoFactorDto } from './dto/verify-2fa.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -83,7 +86,8 @@ export class AuthController {
   @ApiBody({ type: VerifyTwoFactorDto })
   @ApiResponse({
     status: 200,
-    description: '2FA verified. Returns full auth tokens + user object (including name).',
+    description:
+      '2FA verified. Returns full auth tokens + user object (including name).',
     type: VerifyLoginOtpResponseDto,
   })
   @ApiResponse({
@@ -197,6 +201,64 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
   async refreshToken(@Body() dto: RefreshTokenDto) {
     return this.authService.refreshAccessToken(dto.refreshToken);
+  }
+
+  @Public()
+  @Throttle({
+    default: {
+      ttl: 60 * 1000,
+      limit: Number(process.env.THROTTLE_AUTH_LIMIT ?? 5),
+    },
+  })
+  @Post('register')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Register a new user account (alias for signup)' })
+  @ApiBody({ type: SignupDto })
+  async register(@Body() signupDto: SignupDto) {
+    return this.authService.signup(signupDto);
+  }
+
+  @Post('2fa/setup')
+  @ApiOperation({ summary: 'Generate TOTP secret, QR code, and backup codes' })
+  @ApiResponse({ status: 201, type: TwoFactorSetupResponseDto })
+  async setupTwoFactor(
+    @Request() req: { user: { userId: string } },
+  ): Promise<TwoFactorSetupResponseDto> {
+    return this.authService.setupTwoFactor(req.user.userId);
+  }
+
+  @Post('2fa/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify TOTP and enable two-factor authentication' })
+  @ApiBody({ type: TwoFactorTokenDto })
+  async verifyTwoFactorSetup(
+    @Request() req: { user: { userId: string } },
+    @Body() dto: TwoFactorTokenDto,
+  ) {
+    return this.authService.verifyTwoFactorSetup(req.user.userId, dto);
+  }
+
+  @Post('2fa/disable')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Disable two-factor authentication' })
+  @ApiBody({ type: TwoFactorTokenDto })
+  async disableTwoFactor(
+    @Request() req: { user: { userId: string } },
+    @Body() dto: TwoFactorTokenDto,
+  ) {
+    return this.authService.disableTwoFactor(req.user.userId, dto);
+  }
+
+  @Public()
+  @Post('2fa/authenticate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Complete login with TOTP or backup code after requires2FA',
+  })
+  @ApiBody({ type: AuthenticateTwoFactorDto })
+  @ApiResponse({ status: 200, type: VerifyLoginOtpResponseDto })
+  async authenticateTwoFactor(@Body() dto: AuthenticateTwoFactorDto) {
+    return this.authService.authenticateTwoFactor(dto);
   }
 
   @Public()

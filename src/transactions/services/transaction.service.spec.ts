@@ -15,7 +15,7 @@ import { ExchangeRatesService } from '../../exchange-rates/exchange-rates.servic
 import { StellarService } from '../../blockchain/stellar/stellar.service';
 import { UsersService } from '../../users/users.service';
 import { AuditLogsService } from '../../audit-logs/audit-logs.service';
-import { ReferralsService } from '../../referrals/referrals.service';
+import { V2ReferralsService } from '../../modules/referrals/referrals.service';
 import { FeesService } from '../../fees/fees.service';
 import {
   FeeTransactionType,
@@ -91,7 +91,7 @@ describe('TransactionsService fee integration behavior', () => {
   };
 
   const referralsService = {
-    processReferralReward: jest.fn(async () => undefined),
+    processRewardOnFirstTransaction: jest.fn(async () => undefined),
   };
 
   const feesService = {
@@ -173,7 +173,7 @@ describe('TransactionsService fee integration behavior', () => {
         { provide: FeesService, useValue: feesService },
         { provide: UsersService, useValue: usersService },
         { provide: AuditLogsService, useValue: auditLogsService },
-        { provide: ReferralsService, useValue: referralsService },
+        { provide: V2ReferralsService, useValue: referralsService },
         { provide: FirebaseService, useValue: firebaseService },
         { provide: WebhookService, useValue: webhookService },
         { provide: NotificationsService, useValue: notificationsService },

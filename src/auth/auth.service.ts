@@ -25,12 +25,17 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SignupDto } from './dto/signup.dto';
 import { VerifySignupOtpDto } from './dto/verify-signup-otp.dto';
 import { VerifySignupResponseDto } from './dto/signup-response.dto';
-import { AuthUserResponseDto, VerifyLoginOtpResponseDto } from './dto/signup-response.dto';
+import {
+  AuthUserResponseDto,
+  VerifyLoginOtpResponseDto,
+} from './dto/signup-response.dto';
+import { AuthenticateTwoFactorDto } from './dto/authenticate-2fa.dto';
+import { TwoFactorTokenDto } from './dto/two-factor-token.dto';
 import { VerifyTwoFactorDto } from './dto/verify-2fa.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction } from '../audit-logs/enums/audit-action.enum';
-import { ReferralsService } from '../referrals/referrals.service';
+import { V2ReferralsService } from '../modules/referrals/referrals.service';
 import { TwoFactorService } from '../two-factor/two-factor.service';
 import { WalletsService } from '../wallets/wallets.service';
 
@@ -46,7 +51,7 @@ export class AuthService {
     private readonly stellarService: StellarService,
     private readonly encryptionService: EncryptionService,
     private readonly auditLogsService: AuditLogsService,
-    private readonly referralsService: ReferralsService,
+    private readonly v2ReferralsService: V2ReferralsService,
     private readonly twoFactorService: TwoFactorService,
     private readonly walletsService: WalletsService,
     @InjectRepository(PasswordResetAttempt)
@@ -57,7 +62,7 @@ export class AuthService {
     loginDto: LoginDto,
     ipAddress?: string,
     userAgent?: string,
-  ): Promise<{ message: string }> {
+  ): Promise<{ message: string } | { requires2FA: true; tempToken: string }> {
     const user = await this.usersService.findByEmail(loginDto.email);
     const genericMessage =
       'If an account exists with this email, an OTP has been sent.';
@@ -102,6 +107,30 @@ export class AuthService {
       );
 
       return { message: genericMessage };
+    }
+
+    if (user.isTwoFactorEnabled) {
+      const tempToken = this.jwtService.sign(
+        {
+          sub: user.id,
+          email: user.email,
+          role: user.role,
+          authStage: 'partial_auth',
+        },
+        { expiresIn: '5m' },
+      );
+
+      await this.auditLogsService.logAuthEvent(user.id, AuditAction.LOGIN, {
+        method: 'email',
+        status: '2fa_required',
+        ip: ipAddress,
+        device: userAgent,
+      });
+
+      return {
+        requires2FA: true,
+        tempToken,
+      };
     }
 
     const otp = await this.otpsService.generateOtp(user, OtpType.LOGIN);
@@ -188,6 +217,70 @@ export class AuthService {
       device: userAgent,
       hasOtp: true,
       hasTwoFactor: false,
+    });
+
+    return tokens;
+  }
+
+  async setupTwoFactor(userId: string) {
+    const result = await this.twoFactorService.generateSecret(userId);
+    return {
+      qrCode: result.qrCode,
+      manualEntryKey: result.manualEntryKey,
+      backupCodes: result.backupCodes,
+    };
+  }
+
+  async verifyTwoFactorSetup(userId: string, dto: TwoFactorTokenDto) {
+    await this.twoFactorService.confirmTwoFactor(userId, dto.token);
+    return { message: 'Two-factor authentication enabled' };
+  }
+
+  async disableTwoFactor(userId: string, dto: TwoFactorTokenDto) {
+    await this.twoFactorService.disableTwoFactor(userId, dto.token);
+    return { message: 'Two-factor authentication disabled' };
+  }
+
+  async authenticateTwoFactor(
+    dto: AuthenticateTwoFactorDto,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<VerifyLoginOtpResponseDto> {
+    const userId = this.getUserIdFromPartialAuth(dto.tempToken);
+    const user = await this.usersService.findById(userId);
+
+    if (!user || !user.isVerified || !user.isTwoFactorEnabled) {
+      throw new UnauthorizedException('Invalid two-factor verification state');
+    }
+
+    try {
+      await this.twoFactorService.tryAuthenticate(userId, dto.totpToken);
+    } catch {
+      await this.auditLogsService.logAuthEvent(
+        user.id,
+        AuditAction.FAILED_LOGIN,
+        {
+          reason: 'Invalid TOTP or backup code',
+          ip: ipAddress,
+          device: userAgent,
+        },
+      );
+      throw new UnauthorizedException('Invalid two-factor code');
+    }
+
+    await this.usersService.updateByUserId(user.id, {
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+    });
+
+    const tokens = await this.issueAuthTokens(user.id, user.email, user.role);
+
+    await this.auditLogsService.logAuthEvent(user.id, AuditAction.LOGIN, {
+      method: 'email+totp',
+      status: 'success',
+      ip: ipAddress,
+      device: userAgent,
+      hasTwoFactor: true,
     });
 
     return tokens;
@@ -429,7 +522,10 @@ export class AuthService {
     );
 
     if (referredBy) {
-      await this.referralsService.createPendingReferral(referredBy, user.id);
+      await this.v2ReferralsService.linkReferralOnRegistration(
+        referredBy,
+        user.id,
+      );
     }
 
     // Generate and send OTP
@@ -660,7 +756,11 @@ export class AuthService {
     return decoded.sub;
   }
 
-  private async issueAuthTokens(userId: string, email: string, role: string): Promise<VerifyLoginOtpResponseDto> {
+  private async issueAuthTokens(
+    userId: string,
+    email: string,
+    role: string,
+  ): Promise<VerifyLoginOtpResponseDto> {
     const user = await this.usersService.findById(userId);
     const payload = { sub: userId, email, role };
     const authUser: AuthUserResponseDto = {

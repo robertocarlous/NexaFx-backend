@@ -11,7 +11,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { UsersService } from '../users/users.service';
 import { EncryptionService } from '../common/services/encryption.service';
-import { SetupTwoFactorResponseDto } from './dto/setup-two-factor-response.dto';
 import { BackupCode } from './entities/backup-code.entity';
 
 @Injectable()
@@ -23,7 +22,13 @@ export class TwoFactorService {
     private readonly encryptionService: EncryptionService,
   ) {}
 
-  async generateSecret(userId: string): Promise<SetupTwoFactorResponseDto> {
+  async generateSecret(userId: string): Promise<{
+    qrCode: string;
+    manualEntryKey: string;
+    backupCodes: string[];
+    otpauthUrl: string;
+    qrCodeDataUrl: string;
+  }> {
     const user = await this.usersService.findById(userId);
 
     if (!user) {
@@ -48,11 +53,28 @@ export class TwoFactorService {
     });
 
     const qrCodeDataUrl = await qrcode.toDataURL(secret.otpauth_url);
+    const qrCode = qrCodeDataUrl.replace(/^data:image\/png;base64,/, '');
+
+    const backupCodes = this.generateBackupCodes(8);
+    await this.backupCodeRepository.delete({ userId });
+    const saltRounds = 12;
+    const entities = await Promise.all(
+      backupCodes.map(async (code) =>
+        this.backupCodeRepository.create({
+          userId,
+          codeHash: await bcrypt.hash(code, saltRounds),
+          consumedAt: null,
+        }),
+      ),
+    );
+    await this.backupCodeRepository.save(entities);
 
     return {
       otpauthUrl: secret.otpauth_url,
       qrCodeDataUrl,
+      qrCode,
       manualEntryKey: secret.base32,
+      backupCodes,
     };
   }
 
@@ -82,7 +104,14 @@ export class TwoFactorService {
       isTwoFactorEnabled: true,
     });
 
-    await this.backupCodeRepository.delete({ userId });
+    const existingCodes = await this.backupCodeRepository.count({
+      where: { userId, consumedAt: IsNull() },
+    });
+
+    if (existingCodes > 0) {
+      return { backupCodes: [] };
+    }
+
     const backupCodes = this.generateBackupCodes(8);
     const saltRounds = 12;
     const entities = await Promise.all(
@@ -138,6 +167,23 @@ export class TwoFactorService {
     return this.verifyTotp(user.twoFactorSecret, totpCode);
   }
 
+  async tryAuthenticate(
+    userId: string,
+    token: string,
+  ): Promise<'totp' | 'backup'> {
+    const user = await this.usersService.findById(userId);
+    if (!user?.isTwoFactorEnabled || !user.twoFactorSecret) {
+      throw new BadRequestException('Two-factor authentication is not enabled');
+    }
+
+    if (/^\d{6}$/.test(token) && this.verifyTotp(user.twoFactorSecret, token)) {
+      return 'totp';
+    }
+
+    await this.consumeBackupCode(userId, token);
+    return 'backup';
+  }
+
   async consumeBackupCode(userId: string, backupCode: string): Promise<void> {
     const user = await this.usersService.findById(userId);
     if (!user) {
@@ -162,7 +208,7 @@ export class TwoFactorService {
       }
     }
 
-    throw new UnauthorizedException('Invalid backup code');
+    throw new UnauthorizedException('Invalid two-factor code');
   }
 
   async regenerateBackupCodes(
@@ -222,9 +268,8 @@ export class TwoFactorService {
   }
 
   private generateBackupCodes(count: number): string[] {
-    // Human-friendly: 10 chars from Crockford-ish alphabet without 0/O/I/1
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    const length = 10;
+    const length = 8;
     const codes = new Set<string>();
 
     while (codes.size < count) {

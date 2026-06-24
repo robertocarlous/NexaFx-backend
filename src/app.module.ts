@@ -24,6 +24,7 @@ import { PushNotificationsModule } from './push-notifications/push-notifications
 import { FirebaseModule } from './firebase/firebase.module';
 import { AdminModule } from './admin/admin.module';
 import { ReferralsModule } from './referrals/referrals.module';
+import { V2ReferralsModule } from './modules/referrals/referrals.module';
 import { DaoModule } from './dao/dao.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { GraphQLApiModule } from './graphql/graphql.module';
@@ -79,6 +80,7 @@ import { UsersModule } from './users/users.module';
     FirebaseModule,
     TransactionsModule,
     ReferralsModule,
+    V2ReferralsModule,
     BeneficiariesModule,
     KycModule,
     ScheduledJobsModule,
