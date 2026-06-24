@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TransactionsService } from './services/transaction.service';
 import { TransactionVerificationService } from './services/transaction-verification.service';
-import { TransactionsController } from './controllers/transaction.controller';
 import { Transaction } from './entities/transaction.entity';
 import { CurrenciesModule } from '../currencies/currencies.module';
 import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
@@ -39,7 +38,7 @@ import { TransactionLimitsModule } from './transaction-limits.module';
     CommonModule,
     TransactionLimitsModule,
   ],
-  controllers: [TransactionsController],
+  controllers: [],
   providers: [TransactionsService, TransactionVerificationService],
   exports: [TransactionsService],
 })

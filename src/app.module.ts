@@ -14,6 +14,7 @@ import { PlanThrottlerGuard } from './common/guards/plan-throttler.guard';
 import { HealthModule } from './health/health.module';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { V2TransactionsModule } from './modules/transactions/transactions.module';
 import { TransactionsModule } from './transactions/transaction.module';
 import { BeneficiariesModule } from './beneficiaries/beneficiaries.module';
 import { KycModule } from './kyc/kyc.module';
@@ -77,6 +78,7 @@ import { UsersModule } from './users/users.module';
     AuditLogsModule,
     NotificationsModule,
     FirebaseModule,
+    V2TransactionsModule,
     TransactionsModule,
     ReferralsModule,
     BeneficiariesModule,

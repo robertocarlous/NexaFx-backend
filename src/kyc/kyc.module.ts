@@ -2,6 +2,7 @@ import { Module, BadRequestException } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { KycService } from './kyc.service';
 import { KycController } from './kyc.controller';
+import { KycGuard } from './guards/kyc.guard';
 import { KycRecord } from './entities/kyc.entity';
 import { User } from '../users/user.entity';
 import { MulterModule } from '@nestjs/platform-express';
@@ -98,6 +99,7 @@ const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
     }),
   ],
   controllers: [KycController],
-  providers: [KycService],
+  providers: [KycService, KycGuard],
+  exports: [KycService, KycGuard],
 })
 export class KycModule {}
